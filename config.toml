@@ -1,0 +1,58 @@
+[DataBase] #La base RMES a été ajouté même si on n'aura pas besoin pour ce projet
+RMES = "sqlrmesprod\\rmesprod/rmes"
+OPENDATA = "SQLOPENDATAPROD\\OPENDATAPROD/OPEN_DATA_PROD"
+
+[Table] # les tables qu'on sera amener à utiliser tout le temps
+Price_Security = "[dbvw].[v_security_price]"
+Portfolio_Position = "[dbvw].[v_portfolio_position_with_weights]"
+Security_Data = "[dbvw].[v_security_data]"
+Share_Quote = "[dbvw].[v_share_quote]"
+Ptf_score = "[dbvw].[v_portfolio_esg_ratio_overview]"
+Security_score = "[dbvw].[v_security_esg_rating]"
+Portfolio_Benchmark = "[dbvw].[v_portfolio_benchmark]"
+Security_Benchmark = "[dbvw].[v_benchmark_position]"
+SR_Data = "[dbvw].[v_share_quote_v3]"
+[Conditions]
+Weight_diff = "1e-5"
+
+[Columns] #liste de colonnes pour chaque table/functions dont on s'en sert souvent
+[Columns.SQL_Query]
+
+Portfolio_Position = "[position_date],[oxygen_portfolio_id],[portfolio_code],[pocket_code],[position_type_name],[oxygen_security_id],[stock_type],[quantity],[price_ccy],[clean_price],[fx_rate_ptf_vs_price],[weight],[weight_exposure]"
+Price_Security = "[value_date],[oxygen_security_id],[ticker],[quotation_mode],[price],[currency]"
+Security_Data = "[oxygen_security_id],[asset_class],[asset_type],[instrument_name],[price_expression],[maturity_date]"
+Price_EoQ = "[oxygen_security_id],[value_date],[price_date],[price_type_code],[quotation_mode],[price]"
+Get_aum = "[quote_date],[portfolio_code],[oxygen_portfolio_id],[portfolio_total_aum]"
+Get_ptf_isr = "[value_date],[great_score]"
+Get_Benchmark_Ref = "[portfolio_code],[rm_portfolio_id],[rm_benchmark_id],[benchmark_type]"
+Security_score = "[asof_date], [oxygen_security_id], [great_score]"
+Security_Benchmark = "[compo_date],[oxygen_security_id],[benchmark_official_weight]"
+Get_SR = "[quote_date_official],[portfolio_code],[subscription_amount],[redemption_amount],[total_subscription_redemption_amount]"
+
+[Columns.Dataframes]
+
+pos_group = ['position_date','oxygen_portfolio_id','portfolio_code','pocket_code','oxygen_security_id','position_type_name']
+POS = ['position_date','oxygen_portfolio_id','portfolio_code','pocket_code','oxygen_security_id','position_type_name','price_ccy','fx_rate_ptf_vs_price']
+Analytics = ['position_date', 'oxygen_portfolio_id', 'portfolio_code', 'pocket_code','oxygen_security_id', 'instrument_name','asset_class','asset_type', 'position_type_name','statut','quantity','weight', 'weight_exposure','price_expression','price_ccy','clean_price','price','fx_rate_ptf_vs_price','value_date','maturity_date','delta_quantity']
+ISR = ['position_date','oxygen_security_id','instrument_name','asset_type','statut','isr_score_gap']
+Expo = ['position_date','oxygen_security_id','instrument_name','asset_type','statut','weight_exposure','benchmark_weight','exposition_statut']
+
+[QuarterlyExpo]  # Il faudra changer ceci pour les dates futures ou implementer un dictionnaire dynamique des dates
+
+Q1_2023 = ["2023-01-01","2023-03-31"]
+Q2_2023 = ["2023-04-01","2023-06-30"]
+Q3_2023 = ["2023-07-01","2023-09-30"]
+Q4_2023 = ["2023-10-01","2023-12-31"]
+
+Q1_2024 = ["2024-01-01","2024-03-29"]
+Q2_2024 = ["2024-04-01","2024-06-28"]
+Q3_2024 = ["2024-07-01","2024-09-30"]
+Q4_2024 = ["2024-10-01","2024-12-31"]
+
+Q1_2025 = ["2025-01-01","2025-03-31"]
+Q2_2025 = ["2025-04-01","2025-06-30"]
+
+
+[Streamlit]
+
+[Plotly]
