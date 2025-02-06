@@ -49,7 +49,7 @@ def get_cache_file(dth:DataHolder,ptf_name:str,quarter:str):
         return None
 
     try:
-        cache_files.sort(key=lambda x: datetime.strptime('_'.join(x.stem.split('_')[-2:]), "%Y%m%d_%H-%M-%S"),
+        cache_files.sort(key=lambda x: datetime.strptime('_'.join(x.stem.split('_')[-2:]), "%Y%m%d_%H-%M"),
                          reverse=True)
         recent_file_name = cache_files[0].stem
 
@@ -129,7 +129,7 @@ def get_ptf_isr(cfg:Config,ptf_id:str,dates:list,db_name:str):
     isr_record.rename(columns = {'value_date':'position_date','great_score':'ptf_score'}, inplace = True)
     return isr_record
 
-def get_ptf_pos(cfg:Config,ptf_name:str,quarter:str ,db_name:str = 'OpenData'):
+def get_ptf_pos(cfg:Config,ptf_name:str,pocket_name:str,quarter:str ,db_name:str = 'OpenData'):
 
     validate_config(cfg, quarter)
     table = cfg.hold['Table']
@@ -143,9 +143,10 @@ def get_ptf_pos(cfg:Config,ptf_name:str,quarter:str ,db_name:str = 'OpenData'):
     s_query = (f"SELECT {columns['SQL_Query']['Portfolio_Position']} "
                f"FROM {table['Portfolio_Position']} "
                f"WHERE [portfolio_code] = '{ptf_name.upper()}' "
+               f"AND [pocket_code] = '{pocket_name.upper()}'"
                f"AND [position_date] BETWEEN '{historical_date}' AND '{end_date}' "
                f"AND [stock_type] = 'TIT' "
-               f"ORDER BY [position_date] ASC, [pocket_code] ASC,[oxygen_security_id] ASC;")
+               f"ORDER BY [position_date] ASC,[oxygen_security_id] ASC;")
 
     raw_data = get_view(cfg,db_name,s_query)
 
@@ -283,11 +284,11 @@ def get_analytics_isr(cfg:Config(),ptf:dict,db_name:str = 'OpenData'):
     ptf_id = analytics['oxygen_portfolio_id'].iloc[0]
 
     dates = ptf['DATE']
-    isr_record = get_ptf_isr(cfg, ptf_id, dates, db_name)
+    isr_ptf_record = get_ptf_isr(cfg, ptf_id, dates, db_name)
 
-    start_date,end_date = [valide_date(datetime.strptime(dt,'%Y-%m-%d')).strftime('%Y-%m-%d') for dt in dates]
+    start_date,end_date = dates
 
-    #Formatage des listes ID et Dates
+    #Formatage des listes securities_id et dates
     selected_dates = analytics['position_date'].unique().tolist()
     selected_dates = "','".join(map(str, selected_dates))
     selected_dates = f"'{selected_dates}'"
@@ -308,23 +309,24 @@ def get_analytics_isr(cfg:Config(),ptf:dict,db_name:str = 'OpenData'):
                f"ORDER BY [asof_date] ASC;")
 
     isr_security = get_view(cfg, db_name, s_query)
-
-    isr_security['asof_date'] = pd.to_datetime(isr_security['asof_date'], format = '%Y-%m-%d')
-    isr_security['asof_date'] = isr_security['asof_date'].dt.strftime('%Y-%m-%d')
-
-
-    analytics_isr = isr_security.merge(isr_record, left_on = 'asof_date', right_on = 'position_date', how = 'left')
-    analytics_isr = analytics_isr[['position_date','oxygen_security_id','great_score','ptf_score']]
-    analytics_isr.rename(columns = {'great_score':'security_score'}, inplace = True)
-    analytics_isr.fillna('No Value', inplace = True)
-
-    analytics_isr['isr_score_gap'] = analytics_isr.apply(lambda row: row['security_score'] - row['ptf_score']
-                                             if row['security_score'] != 'No Value' else 'No Value', axis = 1
-    )
+    if not isr_security.empty:
+        isr_security['asof_date'] = pd.to_datetime(isr_security['asof_date'], format = '%Y-%m-%d')
+        isr_security['asof_date'] = isr_security['asof_date'].dt.strftime('%Y-%m-%d')
 
 
-    analytics = analytics.merge(analytics_isr, on = ['position_date','oxygen_security_id'], how = 'left')
-    df_isr = analytics[columns['Dataframes']['ISR']]
+        analytics_isr = isr_security.merge(isr_ptf_record, left_on = 'asof_date', right_on = 'position_date', how = 'left')
+        analytics_isr = analytics_isr[['position_date','oxygen_security_id','great_score','ptf_score']]
+        analytics_isr.rename(columns = {'great_score':'security_score'}, inplace = True)
+
+        analytics_isr['isr_score_gap'] = analytics_isr.apply(lambda row: row['security_score'] - row['ptf_score']
+                                                 if row['security_score'] != 'No Value' else 'No Value', axis = 1
+        )
+
+        analytics = analytics.merge(analytics_isr, on = ['position_date','oxygen_security_id'], how = 'left').fillna('N/A')
+        df_isr = analytics[columns['Dataframes']['ISR']]
+    else:
+        df_isr = pd.DataFrame(data = None, columns = columns['Dataframes']['ISR'])
+
     return {"ISR":df_isr,"ANALYTICS":analytics,"DATE":dates}
 
 def get_analytics_expo(cfg:Config(),ptf:dict,db_name:str = 'OpenData'):
@@ -343,29 +345,34 @@ def get_analytics_expo(cfg:Config(),ptf:dict,db_name:str = 'OpenData'):
                f"AND [benchmark_type] = 'reporting' ")
 
     benchmark_ref = get_view(cfg,db_name,s_query)
-    bench_id = benchmark_ref['rm_benchmark_id'].tolist()[0]
+    if not benchmark_ref.empty:
 
-    s_query = (f"SELECT {columns['SQL_Query']['Security_Benchmark']} "
-               f"FROM {table['Security_Benchmark']} "
-               f"WHERE [compo_date] BETWEEN '{start_date}' AND '{end_date}' "
-               f"AND [benchmark_id] = '{bench_id}' "
-               f"ORDER BY [compo_date] ASC;")
+        bench_id = benchmark_ref['rm_benchmark_id'].values[0]
 
-    securities_weight = get_view(cfg,db_name,s_query).rename(columns ={'compo_date':'position_date',
-                                                                       'benchmark_official_weight':'benchmark_weight'})
+        s_query = (f"SELECT {columns['SQL_Query']['Security_Benchmark']} "
+                   f"FROM {table['Security_Benchmark']} "
+                   f"WHERE [compo_date] BETWEEN '{start_date}' AND '{end_date}' "
+                   f"AND [benchmark_id] = '{bench_id}' "
+                   f"ORDER BY [compo_date] ASC;")
 
-    securities_weight['position_date'] = pd.to_datetime(securities_weight['position_date'], format='%Y-%m-%d')
-    securities_weight['position_date'] = securities_weight['position_date'].dt.strftime('%Y-%m-%d')
+        securities_weight = get_view(cfg,db_name,s_query).rename(columns ={'compo_date':'position_date',
+                                                                           'benchmark_official_weight':'benchmark_weight'})
 
-    analytics_expo = analytics.merge(securities_weight, on = ['position_date','oxygen_security_id'], how = 'left')
+        securities_weight['position_date'] = pd.to_datetime(securities_weight['position_date'], format='%Y-%m-%d')
+        securities_weight['position_date'] = securities_weight['position_date'].dt.strftime('%Y-%m-%d')
 
-    analytics_expo['exposition_statut'] = analytics_expo.apply(lambda row: row['weight_exposure'] - row['benchmark_weight']
-                                                                      if pd.notna(row['benchmark_weight'])
-                                                                      else 'Out of Benchmark', axis=1)
+        analytics_expo = analytics.merge(securities_weight, on = ['position_date','oxygen_security_id'], how = 'left')
 
-    analytics_expo['benchmark_weight'] = analytics_expo['benchmark_weight'].fillna('Out of Benchmark')
+        analytics_expo['exposition_statut'] = analytics_expo.apply(lambda row: row['weight_exposure'] - row['benchmark_weight']
+                                                                          if pd.notna(row['benchmark_weight'])
+                                                                          else 'Out of Benchmark', axis=1)
 
-    df_expo = analytics_expo[columns['Dataframes']['Expo']]
+        analytics_expo['benchmark_weight'] = analytics_expo['benchmark_weight'].fillna('Out of Benchmark')
+
+        df_expo = analytics_expo[columns['Dataframes']['Expo']].fillna('N/A')
+    else :
+        df_expo = pd.DataFrame(data = None, columns = columns['Dataframes']['Expo'])
+        analytics_expo = analytics
 
     return {'EXPO':df_expo,'ANALYTICS':analytics_expo,'DATE':ptf['DATE']}
 
@@ -396,57 +403,71 @@ def get_analytics_SR(cfg:Config(),ptf:dict,db_name:str = 'OpenData'):
                                                 'subscription_amount':'sum',
                                                 'redemption_amount':'sum',
                                                 'total_SR':'sum'}).reset_index()
+    if not SR_df.empty :
+        SR_df['SR_statut'] = SR_df.apply(lambda row: 'Souscription' if row['total_SR'] > 0 else 'Rachat', axis=1)
 
-    SR_df['SR_statut'] = SR_df.apply(lambda row: 'Souscription' if row['total_SR'] > 0 else 'Rachat', axis=1)
+        SR_df['position_date'] = pd.to_datetime(SR_df['position_date'], format='%Y-%m-%d')
+        SR_df['position_date'] = SR_df['position_date'].dt.strftime('%Y-%m-%d')
 
-    SR_df['position_date'] = pd.to_datetime(SR_df['position_date'], format='%Y-%m-%d')
-    SR_df['position_date'] = SR_df['position_date'].dt.strftime('%Y-%m-%d')
+        df_merge = SR_df.drop(columns=['portfolio_code'])
+        analytics = analytics.merge(df_merge, on = 'position_date', how = 'left')
 
-    df_merge = SR_df.drop(columns=['portfolio_code'])
-    analytics = analytics.merge(df_merge, on = 'position_date', how = 'left')
+    SR_df = SR_df.fillna('N/A')
 
     return {'SR':SR_df,'ANALYTICS':analytics,'DATE':ptf['DATE']}
 
-def get_metrics(cfg:Config(),dth:DataHolder(),ptf_name:str,quarter:str,db_name:str = 'OpenData'):
+def get_metrics(cfg:Config(),dth:DataHolder(),ptf_name:str,quarter:str,db_name:str = 'OpenData') -> dict[str,dict[str,pd.DataFrame]]:
     validate_config(cfg,quarter)
-    ref_fund = dth.load('referentiel_fond')
+    ref_fund = dth.load('referentiel_fund')
 
-    ptf_benchmarked = ref_fund[ref_fund['code_ptf'] == ptf_name.upper()]['Benchmark'].values[0] == 'Benchmarked'
+    referentials = ref_fund[ref_fund['code_ptf'] == ptf_name]
+    is_benchmarked = referentials['Benchmark'].tolist()[0]
+    pockets = referentials['pocket_code'].iloc[0]
+    pockets = pockets.split(",") if "," in pockets else [pockets]
+    pockets = [pocket.strip() for pocket in pockets]
 
-    positions = get_ptf_pos(cfg, ptf_name, quarter, db_name)
-    analytics = get_analytics(cfg, positions, db_name)
-    isr_scores = get_analytics_isr(cfg, analytics, db_name)
+    date = cfg.hold['QuarterlyExpo'][quarter]
+    columns = cfg.hold['Columns']
+    dict_pocket = {pocket:None for pocket in pockets}
 
-    if ptf_benchmarked:
-        expositions = get_analytics_expo(cfg, isr_scores, db_name)
-        sr_statut = get_analytics_SR(cfg, expositions, db_name)
-        expo = expositions['EXPO']
-    else:
-        sr_statut = get_analytics_SR(cfg, isr_scores, db_name)
-        expo = None
+    for pocket in pockets:
+        positions = get_ptf_pos(cfg, ptf_name, pocket,quarter, db_name)
+        analytics = get_analytics(cfg, positions, db_name)
+        isr_scores = get_analytics_isr(cfg, analytics, db_name)
 
-    metrics = sr_statut['ANALYTICS']
-    positions = positions['POS']
-    analytics = analytics['ANALYTICS']
-    isr_scores = isr_scores['ISR']
-    SR = sr_statut['SR']
-    date = sr_statut['DATE']
-    creation_date = datetime.now().strftime("%Y%m%d_%H-%M-%S")
+        if is_benchmarked == 'Benchmark':
+            expositions = get_analytics_expo(cfg, isr_scores, db_name)
+            sr_statut = get_analytics_SR(cfg, expositions, db_name)
+            expo = expositions['EXPO']
+        else:
+            sr_statut = get_analytics_SR(cfg, isr_scores, db_name)
+            expo = pd.DataFrame(data = None, columns = columns['Dataframes']['Expo'] )
 
-    data_to_save = {
-        f'{ptf_name.upper()}_METRICS_{quarter}_{creation_date}': metrics,
-        f'{ptf_name.upper()}_POS_{quarter}_{creation_date}': positions,
-        f'{ptf_name.upper()}_ANALYTICS_{quarter}_{creation_date}': analytics,
-        f'{ptf_name.upper()}_ISR_{quarter}_{creation_date}': isr_scores,
-        f'{ptf_name.upper()}_EXPO_{quarter}_{creation_date}': expo,
-        f'{ptf_name.upper()}_SR_{quarter}_{creation_date}': SR
-    }
 
-    for key, data in data_to_save.items():
-        if not dth.exists(key):
-            dth.save(key, data)
+        data_dict= {'METRICS':sr_statut['ANALYTICS'],
+                    'POS':positions['POS'],
+                    'ANALYTICS': analytics['ANALYTICS'],
+                    'ISR':isr_scores['ISR'],
+                    'EXPO':expo,
+                    'SR':sr_statut['SR'],
+                    'DATE':date}
 
-    return {'METRICS':metrics,'POS':positions,'ANALYTICS':analytics,'ISR':isr_scores,'EXPO':expo,'SR':SR,'DATE':date}
+        creation_date = datetime.now().strftime("%Y%m%d_%H-%M")
+
+        data_to_save = {
+            f'{pocket}_METRICS_{quarter}_{creation_date}': data_dict['METRICS'],
+            f'{pocket}_POS_{quarter}_{creation_date}': data_dict['POS']
+        }
+
+        for key, data in data_to_save.items():
+            if not dth.exists(key):
+                dth.save(key, data)
+
+        export_to_excel(dataframe = data_dict['METRICS'],name = f"{pocket}_{creation_date}",quarter = quarter)
+
+        dict_pocket[pocket] = data_dict
+
+    return dict_pocket
 
 def export_to_excel(dataframe:pd.DataFrame, name:str, quarter:str = None):
     script_dir = os.path.dirname(__file__)
@@ -483,6 +504,9 @@ def export_to_excel(dataframe:pd.DataFrame, name:str, quarter:str = None):
 ########################################################################################################################
 
 if __name__ == '__main__':
-    BIO_metrics = get_metrics(Config(),DataHolder(),'BIO','Q3_2024')
+    #funds_name = ['BIO','CNA','REA','TUA','SCG','RAE','PML','FAE','FAN','SCM','TVG','TAE']
+    funds_name = ['AMP']
+    qtr = 'Q4_2024'
 
-    print(BIO_metrics['METRICS'].dtypes)
+    for fund_name in funds_name:
+        fund_metric = get_metrics(Config(),DataHolder(),fund_name,qtr)
